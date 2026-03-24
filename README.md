@@ -138,12 +138,12 @@ RPS: 4670 * 18М / 86 400 = 973 000
 
 ## 11. Список ресурсов <a name="11"></a>
 
-1. [Официальный отчет Booking Holdings](https://electroiq.com/stats/booking-com-statistics/) [1]
-2. [Статистика трафика SimilarWeb](https://hypestat.com/info/booking.com) [2]
-3. [Бизнес-аналитика BusinessOfApps](https://www.similarweb.com/ru/website/booking.com/#traffic) [3]
-4. [Количество отзывов на booking](https://www.booking.com) [4]
-5. [Количество зарегистрированных пользователей на TripAdvisor](https://ru.wikipedia.org/wiki/Tripadvisor) [5]
-6. [Количество фото на отзывах](https://review42.com/resources/tripadvisor-statistics/) [6]
-7. [Статистика отзывов по TripAdvisor](https://passport-photo.online/blog/tripadvisor-statistics/)) [7]
-8. [Количество объявлений](https://www.dreambigtravelfarblog.com/blog/booking-com-statistics) [8]
-9. [Количество броней за 2023 год](https://topic.ru/statistics/travel/key-data/kolichestvo-bronirovaniy-cherez-booking-com-po-segmentam/) [9]
+[^1]: [Официальный отчет Booking Holdings](https://electroiq.com/stats/booking-com-statistics/)
+[^2]: [Статистика трафика SimilarWeb](https://hypestat.com/info/booking.com) [2]
+[^3]: [Бизнес-аналитика BusinessOfApps](https://www.similarweb.com/ru/website/booking.com/#traffic) [3]
+[^4]:. [Количество отзывов на booking](https://www.booking.com) [4]
+[^5]: [Количество зарегистрированных пользователей на TripAdvisor](https://ru.wikipedia.org/wiki/Tripadvisor) [5]
+[^6]:. [Количество фото на отзывах](https://review42.com/resources/tripadvisor-statistics/) [6]
+[^7]: [Статистика отзывов по TripAdvisor](https://passport-photo.online/blog/tripadvisor-statistics/)) [7]
+[^8]: [Количество объявлений](https://www.dreambigtravelfarblog.com/blog/booking-com-statistics) [8]
+[^9]:. [Количество броней за 2023 год](https://topic.ru/statistics/travel/key-data/kolichestvo-bronirovaniy-cherez-booking-com-po-segmentam/) [9]
