@@ -359,6 +359,137 @@ Booking.com перешёл с F5 BIG-IP на HAProxy, поскольку F5 бы
 
 ---
 
+# 5. Логическая схема БД
+
+## 5.1 Схема БД
+
+```mermaid
+erDiagram
+    USERS {
+        bigint id PK
+        text email UK
+        text first_name
+        text last_name
+        text phone
+        text avatar_url
+        text cover_url
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PROPERTIES {
+        bigint id PK
+        bigint host_id FK
+        text title
+        text description
+        text address
+        float rating
+        int price_per_night
+        int max_guests
+        int bedrooms
+        int bathrooms
+        json amenities
+        boolean is_available
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PROPERTY_PHOTOS {
+        bigint id PK
+        bigint property_id FK
+        text photo_url
+        int sort_order
+        timestamptz created_at
+    }
+
+    BOOKINGS {
+        bigint id PK
+        bigint property_id FK
+        bigint guest_id FK
+        date check_in_date
+        date check_out_date
+        int total_price
+        text status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    REVIEWS {
+        bigint id PK
+        bigint booking_id FK
+        bigint property_id FK
+        bigint user_id FK
+        int rating
+        text comment
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    REVIEW_PHOTOS {
+        bigint id PK
+        bigint review_id FK
+        text photo_url
+        timestamptz created_at
+    }
+
+    SEARCH_QUERIES {
+        uuid id PK
+        text query
+        text filters
+        bigint user_id FK
+        timestamptz created_at
+    }
+
+    RECOMMENDATIONS {
+        bigint id PK
+        bigint user_id FK
+        bigint property_id FK
+        float score
+        timestamptz created_at
+    }
+
+    USERS ||--o{ PROPERTIES : hosts
+    USERS ||--o{ BOOKINGS : makes
+    USERS ||--o{ REVIEWS : writes
+    USERS ||--o{ SEARCH_QUERIES : performs
+    USERS ||--o{ RECOMMENDATIONS : receives
+
+    PROPERTIES ||--o{ PROPERTY_PHOTOS : has
+    PROPERTIES ||--o{ BOOKINGS : has
+    PROPERTIES ||--o{ REVIEWS : receives
+
+    BOOKINGS ||--o{ REVIEWS : generates
+
+    REVIEWS ||--o{ REVIEW_PHOTOS : includes
+```
+
+## 5.2 Таблица с описанием таблиц
+
+| Таблица | Описание | Размер строки | Количество строк | Размер таблицы | Нагрузка на запись (QPS, пик) | Нагрузка на чтение (QPS, пик) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`users`** | Профили пользователей (гости + хосты) | id(8) + email(50) + first_name(30) + last_name(30) + phone(15) + avatar_url(100) + cover_url(100) + created_at(8) + updated_at(8) ≈ 349 Б | 80 млн | ~28 ГБ | 61 | 1 814 |
+| **`properties`** | Объявления (отели, апартаменты) | id(8) + host_id(8) + title(100) + description(500) + address(200) + rating(4) + price_per_night(4) + max_guests(2) + bedrooms(2) + bathrooms(2) + amenities(500) + is_available(1) + created_at(8) + updated_at(8) ≈ 1,35 КБ | 28 млн | ~38 ГБ | 20 | 1 968 |
+| **`property_photos`** | Фотографии объявлений | id(8) + property_id(8) + photo_url(200) + sort_order(2) + created_at(8) ≈ 226 Б | 280 млн | ~63 ГБ | 20 | 1 968 |
+| **`bookings`** | Бронирования | id(8) + property_id(8) + guest_id(8) + check_in_date(4) + check_out_date(4) + total_price(4) + status(20) + created_at(8) + updated_at(8) ≈ 72 Б | 1,16 млрд (за 5 лет) | ~83 ГБ | 39 | 78 |
+| **`reviews`** | Отзывы пользователей | id(8) + booking_id(8) + property_id(8) + user_id(8) + rating(2) + comment(2000) + created_at(8) + updated_at(8) ≈ 2,05 КБ | 300 млн | ~615 ГБ | 1 | 630 |
+| **`review_photos`** | Фотографии в отзывах | id(8) + review_id(8) + photo_url(200) + created_at(8) ≈ 224 Б | 160 млн | ~36 ГБ | 1 | 630 |
+| **`search_queries`** | История поисков | id(16) + query(100) + filters(500) + user_id(8) + created_at(8) ≈ 632 Б | 34 млн/сут | ~21 ГБ/сут | 788 | 394 |
+| **`recommendations`** | Рекомендации (кэш) | id(8) + user_id(8) + property_id(8) + score(4) + created_at(8) ≈ 36 Б | 1,6 млрд/сут | ~58 ГБ/сут | 1 814 | 1 814 |
+
+## 5.3 Требования к консистентности
+
+| Таблица | Требование | Обоснование |
+| :--- | :--- | :--- |
+| **`users`** | Strong Consistency | Данные профиля должны быть актуальны при каждой авторизации |
+| **`properties`** | Strong Consistency | Статус доступности и цены должны быть точными для бронирования |
+| **`property_photos`** | Eventual Consistency | Небольшая задержка при загрузке фото допустима |
+| **`bookings`** | Strong Consistency | Транзакции с деньгами требуют строгой консистентности (ACID) |
+| **`reviews`** | Strong Consistency | Отзывы должны быть видны сразу после публикации |
+| **`review_photos`** | Eventual Consistency | Аналогично property_photos |
+| **`search_queries`** | Eventual Consistency | Аналитика, допустима задержка |
+| **`recommendations`** | Eventual Consistency | Кэш рекомендаций можно обновлять асинхронно |
+
+
 ## 11. Список ресурсов <a name="11"></a>
 
 [^1]: [Официальный отчет Booking Holdings](https://electroiq.com/stats/booking-com-statistics/)
