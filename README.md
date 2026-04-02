@@ -489,6 +489,222 @@ erDiagram
 | **`search_queries`** | Eventual Consistency | Аналитика, допустима задержка |
 | **`recommendations`** | Eventual Consistency | Кэш рекомендаций можно обновлять асинхронно |
 
+# 6. Физическая схема БД
+
+## Денормализация
+
+1. Для оптимизации загрузки главной страницы (списка популярных объявлений) в таблицу `properties` добавлено поле `avg_rating` — средний рейтинг, который обновляется асинхронно при добавлении новых отзывов. Это позволяет отображать рейтинг без JOIN с `reviews`.
+2. В `properties` хранится `total_reviews_count` для быстрого отображения количества отзывов без агрегации по `reviews`.
+3. Для ускорения поиска добавлена таблица `search_index` — денормализованное представление объявлений с ключевыми полями для фильтрации.
+4. Фотографии вынесены из таблиц в объектное хранилище (S3); в PostgreSQL остаются `photo_url`.
+
+```mermaid
+erDiagram
+    USERS {
+        bigint id PK
+        text email UK
+        text first_name
+        text last_name
+        text phone
+        text avatar_url
+        text cover_url
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PROPERTIES {
+        bigint id PK
+        bigint host_id FK
+        text title
+        text description
+        text address
+        float avg_rating
+        int total_reviews_count
+        int price_per_night
+        int max_guests
+        int bedrooms
+        int bathrooms
+        json amenities
+        boolean is_available
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    PROPERTY_PHOTOS {
+        bigint id PK
+        bigint property_id FK
+        text photo_url
+        int sort_order
+        timestamptz created_at
+    }
+
+    BOOKINGS {
+        bigint id PK
+        bigint property_id FK
+        bigint guest_id FK
+        date check_in_date
+        date check_out_date
+        int total_price
+        text status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    REVIEWS {
+        bigint id PK
+        bigint booking_id FK
+        bigint property_id FK
+        bigint user_id FK
+        int rating
+        text comment
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    REVIEW_PHOTOS {
+        bigint id PK
+        bigint review_id FK
+        text photo_url
+        timestamptz created_at
+    }
+
+    SEARCH_INDEX {
+        bigint property_id PK
+        text title
+        text description
+        text address
+        float avg_rating
+        int price_per_night
+        int max_guests
+        int bedrooms
+        json amenities
+        tsvector search_vector
+    }
+
+    RECOMMENDATIONS_CACHE {
+        bigint user_id PK
+        bigint property_ids[]
+        float scores[]
+        timestamptz expires_at
+    }
+
+    USERS ||--o{ PROPERTIES : hosts
+    USERS ||--o{ BOOKINGS : makes
+    USERS ||--o{ REVIEWS : writes
+    USERS ||--o{ RECOMMENDATIONS_CACHE : receives
+
+    PROPERTIES ||--o{ PROPERTY_PHOTOS : has
+    PROPERTIES ||--o{ BOOKINGS : has
+    PROPERTIES ||--o{ REVIEWS : receives
+    PROPERTIES ||--|| SEARCH_INDEX : indexed_by
+
+    BOOKINGS ||--o{ REVIEWS : generates
+
+    REVIEWS ||--o{ REVIEW_PHOTOS : includes
+```
+
+## 6.1 Выбор СУБД
+
+| Таблица / Хранилище | СУБД / хранилище | Обоснование |
+| :--- | :--- | :--- |
+| `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos` | **PostgreSQL** | ACID-транзакции (бронирования, платежи), строгая консистентность, сложные JOIN-запросы |
+| `search_index` | **Elasticsearch** | Полнотекстовый поиск, геопоиск, фильтрация по множеству полей, высокая производительность чтения |
+| `recommendations_cache` | **Redis** | Низкая задержка, частые чтения, TTL для кэша рекомендаций |
+| Фотографии (файлы) | **S3-совместимое хранилище** | Хранение больших бинарных данных, CDN-раздача, георепликация |
+
+**Итого:**
+
+- **PostgreSQL:** `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos`
+- **Elasticsearch:** `search_index`
+- **Redis:** `recommendations_cache`, кэш сессий, кэш популярных объявлений
+- **S3:** объекты по ключу из `photo_url`
+
+## 6.2 Индексы
+
+| Таблица | Поле | Тип индекса | Обоснование |
+| :--- | :--- | :--- | :--- |
+| `users` | `id` | B-Tree | Поиск профиля по ID |
+| `users` | `email` | Hash | Поиск при авторизации |
+| `users` | `phone` | Hash | Поиск при авторизации |
+| `properties` | `id` | B-Tree | Доступ к карточке объявления |
+| `properties` | `host_id` | B-Tree | Поиск всех объявлений хоста |
+| `properties` | `(price_per_night, avg_rating)` | Composite B-Tree | Сортировка и фильтрация при поиске |
+| `properties` | `is_available` | B-Tree | Фильтрация только доступных объявлений |
+| `property_photos` | `(property_id, sort_order)` | Composite B-Tree | Получение всех фото объявления в правильном порядке |
+| `bookings` | `guest_id` | B-Tree | История бронирований пользователя |
+| `bookings` | `property_id` | B-Tree | Поиск броней для календаря доступности |
+| `bookings` | `(guest_id, status)` | Composite B-Tree | Фильтрация активных/завершённых броней |
+| `reviews` | `property_id` | B-Tree | Получение всех отзывов об объявлении |
+| `reviews` | `user_id` | B-Tree | Все отзывы, написанные пользователем |
+| `reviews` | `(property_id, rating)` | Composite B-Tree | Сортировка отзывов по рейтингу |
+| `search_index` | `search_vector` | GIN (PostgreSQL) / Inverted Index (Elasticsearch) | Полнотекстовый поиск по заголовку, описанию, адресу |
+| `search_index` | `(price_per_night, avg_rating, bedrooms)` | Composite B-Tree | Фильтрация и сортировка результатов поиска |
+| `recommendations_cache` | `user_id` | Redis Key | Быстрое получение персонализированных рекомендаций |
+
+## 6.3 Шардирование и резервирование СУБД
+
+**Шардирование**
+
+| Таблица | СУБД | Ключ шардирования | Обоснование |
+| :--- | :--- | :--- | :--- |
+| `users` | PostgreSQL | `id` | Равномерное распределение нагрузки |
+| `properties` | PostgreSQL | `id` | Равномерное распределение объявлений |
+| `property_photos` | PostgreSQL | `property_id` | Все фото одного объявления на одном узле |
+| `bookings` | PostgreSQL | `guest_id` | Все бронирования одного гостя на одном узле |
+| `reviews` | PostgreSQL | `property_id` | Все отзывы об одном объекте на одном узле |
+| `review_photos` | PostgreSQL | `review_id` | Все фото одного отзыва на одном узле |
+| `search_index` | Elasticsearch | `property_id` (routing) | Документ одного объявления на одном шарде |
+| `recommendations_cache` | Redis | `user_id` | Кэш одного пользователя на одном узле кластера |
+
+**Резервирование**
+
+| СУБД | Схема | Обоснование |
+| :--- | :--- | :--- |
+| PostgreSQL | Master–Replica (1 мастер, 2 реплики). Запись на мастер, чтение с реплик. Автоматический failover через Patroni | Исключение единой точки отказа, распределение нагрузки чтения (1 814–1 968 RPS) |
+| Elasticsearch | Каждый шард имеет 1 реплику (Replication Factor = 2). Master-узел выбирается автоматически | Отказоустойчивость поиска, сохранение данных при падении узла |
+| Redis | Redis Cluster (мастер + реплика на каждый слот). Автоматический failover | Отказоустойчивость кэша рекомендаций |
+| S3 | Георепликация между регионами (EU, US, AP) | Защита от отказа целого дата-центра, быстрая CDN-раздача фото |
+
+## 6.4 Клиентские библиотеки и интеграции
+
+| СУБД | Примеры для Go | Примеры для Python |
+| :--- | :--- | :--- |
+| PostgreSQL | `pgx`, `jackc/pgx` | `psycopg2`, `asyncpg`, `SQLAlchemy` |
+| Elasticsearch | `elastic/go-elasticsearch` | `elasticsearch-py`, `elasticsearch-dsl` |
+| Redis | `go-redis/redis` | `redis-py`, `aredis` |
+| S3 | `minio-go`, `aws-sdk-go` | `boto3`, `minio-py` |
+
+## 6.5 Балансировка запросов и мультиплексирование подключений
+
+| СУБД | Механизм | Как работает |
+| :--- | :--- | :--- |
+| PostgreSQL | PgBouncer (пул соединений) | PgBouncer поддерживает пул постоянных соединений к PostgreSQL, объединяя множество коротких подключений в ограниченное число долгоживущих сессий. Это снижает накладные расходы на создание новых соединений (пик ~3 628 RPS) |
+| Elasticsearch | Встроенный HTTP-балансировщик + клиентское кеширование | Клиент получает список узлов и распределяет запросы round-robin. Запросы к поиску кешируются на уровне приложения |
+| Redis | Smart Client (go-redis) | Клиент сам вычисляет, какой узел кластера отвечает за ключ (CRC16 хэш слота), и обращается к нему напрямую |
+| S3 | CDN + GeoDNS | Медиафайлы раздаются через CDN (CloudFront) — edge-серверы ближе к пользователю. При отказе региона GeoDNS перенаправляет на работающий S3-бакет |
+
+## 6.6 Схема резервного копирования
+
+| Хранилище | Что бэкапим | Как бэкапим | Зачем |
+| :--- | :--- | :--- | :--- |
+| PostgreSQL | `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos` | Ежедневный полный бэкап + непрерывная архивация WAL (pg_basebackup + WAL-G) | Можно восстановить на любой момент времени (до секунды). Критично для бронирований и платежей |
+| Elasticsearch | `search_index` | Ежедневные снапшоты (Elasticsearch Snapshot API) + инкрементальные бэкапы изменений | Восстановление поискового индекса при коррупции данных |
+| Redis | `recommendations_cache`, сессии | AOF (каждую секунду) + RDB (раз в час) | Минимум потерь (до 1 секунды), легкое восстановление кэша |
+| S3 | Фото объявлений, фото отзывов, аватары | Георепликация между регионами (EU → US → AP) | Сами файлы не бэкапятся отдельно — устойчивость за счёт копирования в другие регионы. При падении региона — автоматическое переключение |
+
+## 6.7 Сводная таблица требований к БД
+
+| Хранилище | Таблицы / данные | RPS чтения (пик) | RPS записи (пик) | Объём данных | Ключевое требование |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| PostgreSQL | `users` | 1 814 | 61 | ~28 ГБ | Strong Consistency |
+| PostgreSQL | `properties` | 1 968 | 20 | ~38 ГБ | Strong Consistency |
+| PostgreSQL | `property_photos` | 1 968 | 20 | ~63 ГБ | Strong Consistency |
+| PostgreSQL | `bookings` | 78 | 39 | ~83 ГБ | Strong Consistency (ACID) |
+| PostgreSQL | `reviews` | 630 | 1 | ~615 ГБ | Strong Consistency |
+| PostgreSQL | `review_photos` | 630 | 1 | ~36 ГБ | Strong Consistency |
+| Elasticsearch | `search_index` | 788 | 788 | ~21 ГБ/сут | Eventual Consistency |
+| Redis | `recommendations_cache` | 1 814 | 1 814 | ~58 ГБ/сут | Eventual Consistency |
+| S3 | Фото (все) | ~90 Гбит/с (исходящий трафик) | ~6 Гбит/с (входящий) | ~147 ТБ (всего) | Eventual Consistency |
 
 ## 11. Список ресурсов <a name="11"></a>
 
