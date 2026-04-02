@@ -157,9 +157,9 @@ RPS рассчитывается по формуле: **RPS = (DAU × Дейст
 | --- | --- |
 | **`api.booking.com`** | Основное API (поиск, бронирование, профили, отзывы) |
 | **`distribution-xml.booking.com`** | API для коммерческих партнёров (Demand API) [^15][^16] |
-| **`supply-xml.booking.com`** | API для поставщиков жилья (Connectivity API) [citation:7] |
-| **`secure-supply-xml.booking.com`** | Защищённый API для PCI/бронирований [citation:7] |
-| **`bstatic.com`** | CDN для раздачи статики (фото отелей, JS, CSS) [citation:8] |
+| **`supply-xml.booking.com`** | API для поставщиков жилья (Connectivity API) [^15] |
+| **`secure-supply-xml.booking.com`** | Защищённый API для PCI/бронирований [^15] |
+| **`bstatic.com`** | CDN для раздачи статики (фото отелей, JS, CSS) [^16] |
 | **`booking.com`** | Основной веб-сайт (HTML-страницы) |
 
 ## 3.2 Расположение дата-центров
