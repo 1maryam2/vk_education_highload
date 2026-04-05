@@ -81,7 +81,7 @@
 
 *Публикация отзывов*: за 2022 год было опубликовано 30,2 млн отзывов[^7]. 30 млн / 365 дней / 17 млн ~ 0,005 отзыва в день в среднем на 1 зарегистрированного пользователя.
 
-*Бронирование*: за 2023 год было сделано 1159 млн бронирований[^13]. 1159 млн / 365 дней / 17 млн ~ 0,2 бронирования в день на 1 пользователя
+*Бронирование*: за 2023 год было сделано 1159 млн бронирований[^8]. 1159 млн / 365 дней / 17 млн ~ 0,2 бронирования в день на 1 пользователя
 
 *Регситрация/Авторизация*: колличество зарегистрированных пользователей - 80 млн. 80 млн / 365 дней / 17 млн ~ 0,01 регистрация в день. Так как данных по количеству авторизаций нет, возьмем в учет то, что пользователь делает 0,2 бронирования в день. Значит в месяц получается около 6 бронирований в месяц. учитывая, что авторизация хранится в сессии, возьмем в среднем 3 авторизации в месяц. Значит, в день получается 0,3 авторизации. Общее число ~0,31 регистраций и авторизаций в день
 
@@ -162,7 +162,7 @@ RPS рассчитывается по формуле: **RPS = (DAU × Дейст
 
 ## 3.2 Расположение дата-центров
 
-Booking.com использует гибридную инфраструктуру: собственная on-premises инфраструктура в сочетании с AWS [^17][^18][^19].
+Booking.com использует гибридную инфраструктуру: собственная on-premises инфраструктура в сочетании с AWS [^17][^15][^19].
 
 | ID | Локация | Обслуживаемый регион |
 | --- | --- | --- |
@@ -381,23 +381,17 @@ erDiagram
         text title
         text description
         text address
-        float rating
+        float avg_rating
+        int total_reviews_count
         int price_per_night
         int max_guests
         int bedrooms
         int bathrooms
         json amenities
         boolean is_available
+        text[] photo_urls
         timestamptz created_at
         timestamptz updated_at
-    }
-
-    PROPERTY_PHOTOS {
-        bigint id PK
-        bigint property_id FK
-        text photo_url
-        int sort_order
-        timestamptz created_at
     }
 
     BOOKINGS {
@@ -412,6 +406,18 @@ erDiagram
         timestamptz updated_at
     }
 
+    PAYMENTS {
+        bigint id PK
+        bigint booking_id FK
+        bigint user_id FK
+        decimal amount
+        text currency
+        text status
+        text payment_method
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     REVIEWS {
         bigint id PK
         bigint booking_id FK
@@ -419,15 +425,9 @@ erDiagram
         bigint user_id FK
         int rating
         text comment
+        text[] photo_urls
         timestamptz created_at
         timestamptz updated_at
-    }
-
-    REVIEW_PHOTOS {
-        bigint id PK
-        bigint review_id FK
-        text photo_url
-        timestamptz created_at
     }
 
     SEARCH_QUERIES {
@@ -451,14 +451,13 @@ erDiagram
     USERS ||--o{ REVIEWS : writes
     USERS ||--o{ SEARCH_QUERIES : performs
     USERS ||--o{ RECOMMENDATIONS : receives
+    USERS ||--o{ PAYMENTS : pays
 
-    PROPERTIES ||--o{ PROPERTY_PHOTOS : has
     PROPERTIES ||--o{ BOOKINGS : has
     PROPERTIES ||--o{ REVIEWS : receives
 
     BOOKINGS ||--o{ REVIEWS : generates
-
-    REVIEWS ||--o{ REVIEW_PHOTOS : includes
+    BOOKINGS ||--|| PAYMENTS : has_one
 ```
 
 ## 5.2 Таблица с описанием таблиц
@@ -466,13 +465,13 @@ erDiagram
 | Таблица | Описание | Размер строки | Количество строк | Размер таблицы | Нагрузка на запись (QPS, пик) | Нагрузка на чтение (QPS, пик) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`users`** | Профили пользователей (гости + хосты) | id(8) + email(50) + first_name(30) + last_name(30) + phone(15) + avatar_url(100) + cover_url(100) + created_at(8) + updated_at(8) ≈ 349 Б | 80 млн | ~28 ГБ | 61 | 1 814 |
-| **`properties`** | Объявления (отели, апартаменты) | id(8) + host_id(8) + title(100) + description(500) + address(200) + rating(4) + price_per_night(4) + max_guests(2) + bedrooms(2) + bathrooms(2) + amenities(500) + is_available(1) + created_at(8) + updated_at(8) ≈ 1,35 КБ | 28 млн | ~38 ГБ | 20 | 1 968 |
-| **`property_photos`** | Фотографии объявлений | id(8) + property_id(8) + photo_url(200) + sort_order(2) + created_at(8) ≈ 226 Б | 280 млн | ~63 ГБ | 20 | 1 968 |
+| **`properties`** | Объявления (отели, апартаменты) | id(8) + host_id(8) + title(100) + description(500) + address(200) + avg_rating(4) + total_reviews_count(4) + price_per_night(4) + max_guests(2) + bedrooms(2) + bathrooms(2) + amenities(500) + is_available(1) + photo_urls(2000) + created_at(8) + updated_at(8) ≈ 3,35 КБ | 28 млн | ~94 ГБ | 20 | 1 968 |
 | **`bookings`** | Бронирования | id(8) + property_id(8) + guest_id(8) + check_in_date(4) + check_out_date(4) + total_price(4) + status(20) + created_at(8) + updated_at(8) ≈ 72 Б | 1,16 млрд (за 5 лет) | ~83 ГБ | 39 | 78 |
-| **`reviews`** | Отзывы пользователей | id(8) + booking_id(8) + property_id(8) + user_id(8) + rating(2) + comment(2000) + created_at(8) + updated_at(8) ≈ 2,05 КБ | 300 млн | ~615 ГБ | 1 | 630 |
-| **`review_photos`** | Фотографии в отзывах | id(8) + review_id(8) + photo_url(200) + created_at(8) ≈ 224 Б | 160 млн | ~36 ГБ | 1 | 630 |
+| **`payments`** | Платежи | id(8) + booking_id(8) + user_id(8) + amount(8) + currency(3) + status(20) + payment_method(20) + created_at(8) + updated_at(8) ≈ 91 Б | 1,16 млрд | ~105 ГБ | 39 | 78 |
+| **`reviews`** | Отзывы пользователей | id(8) + booking_id(8) + property_id(8) + user_id(8) + rating(2) + comment(2000) + photo_urls(2000) + created_at(8) + updated_at(8) ≈ 4 КБ | 300 млн | ~1,2 ТБ | 1 | 630 |
 | **`search_queries`** | История поисков | id(16) + query(100) + filters(500) + user_id(8) + created_at(8) ≈ 632 Б | 34 млн/сут | ~21 ГБ/сут | 788 | 394 |
 | **`recommendations`** | Рекомендации (кэш) | id(8) + user_id(8) + property_id(8) + score(4) + created_at(8) ≈ 36 Б | 1,6 млрд/сут | ~58 ГБ/сут | 1 814 | 1 814 |
+
 
 ## 5.3 Требования к консистентности
 
@@ -480,10 +479,9 @@ erDiagram
 | :--- | :--- | :--- |
 | **`users`** | Strong Consistency | Данные профиля должны быть актуальны при каждой авторизации |
 | **`properties`** | Strong Consistency | Статус доступности и цены должны быть точными для бронирования |
-| **`property_photos`** | Eventual Consistency | Небольшая задержка при загрузке фото допустима |
 | **`bookings`** | Strong Consistency | Транзакции с деньгами требуют строгой консистентности (ACID) |
-| **`reviews`** | Strong Consistency | Отзывы должны быть видны сразу после публикации |
-| **`review_photos`** | Eventual Consistency | Аналогично property_photos |
+| **`payments`** | Strong Consistency | Платежи — критическая операция, потеря недопустима |
+| **`reviews`** | Eventual Consistency | Отзывы допускают небольшую задержку после публикации |
 | **`search_queries`** | Eventual Consistency | Аналитика, допустима задержка |
 | **`recommendations`** | Eventual Consistency | Кэш рекомендаций можно обновлять асинхронно |
 
@@ -493,8 +491,9 @@ erDiagram
 
 1. Для оптимизации загрузки главной страницы (списка популярных объявлений) в таблицу `properties` добавлено поле `avg_rating` — средний рейтинг, который обновляется асинхронно при добавлении новых отзывов. Это позволяет отображать рейтинг без JOIN с `reviews`.
 2. В `properties` хранится `total_reviews_count` для быстрого отображения количества отзывов без агрегации по `reviews`.
-3. Для ускорения поиска добавлена таблица `search_index` — денормализованное представление объявлений с ключевыми полями для фильтрации.
-4. Фотографии вынесены из таблиц в объектное хранилище (S3); в PostgreSQL остаются `photo_url`.
+3. Фотографии объявлений хранятся в массиве `photo_urls` внутри таблицы `properties` — это позволяет получить все фото одним запросом.
+4. Фотографии отзывов хранятся в массиве `photo_urls` внутри таблицы `reviews` — аналогично.
+5. Для ускорения поиска добавлена таблица `search_index` — денормализованное представление объявлений с ключевыми полями для фильтрации.
 
 ```mermaid
 erDiagram
@@ -524,16 +523,9 @@ erDiagram
         int bathrooms
         json amenities
         boolean is_available
+        text[] photo_urls
         timestamptz created_at
         timestamptz updated_at
-    }
-
-    PROPERTY_PHOTOS {
-        bigint id PK
-        bigint property_id FK
-        text photo_url
-        int sort_order
-        timestamptz created_at
     }
 
     BOOKINGS {
@@ -548,6 +540,18 @@ erDiagram
         timestamptz updated_at
     }
 
+    PAYMENTS {
+        bigint id PK
+        bigint booking_id FK
+        bigint user_id FK
+        decimal amount
+        text currency
+        text status
+        text payment_method
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
     REVIEWS {
         bigint id PK
         bigint booking_id FK
@@ -555,15 +559,9 @@ erDiagram
         bigint user_id FK
         int rating
         text comment
+        text[] photo_urls
         timestamptz created_at
         timestamptz updated_at
-    }
-
-    REVIEW_PHOTOS {
-        bigint id PK
-        bigint review_id FK
-        text photo_url
-        timestamptz created_at
     }
 
     SEARCH_INDEX {
@@ -590,69 +588,71 @@ erDiagram
     USERS ||--o{ BOOKINGS : makes
     USERS ||--o{ REVIEWS : writes
     USERS ||--o{ RECOMMENDATIONS_CACHE : receives
+    USERS ||--o{ PAYMENTS : pays
 
-    PROPERTIES ||--o{ PROPERTY_PHOTOS : has
     PROPERTIES ||--o{ BOOKINGS : has
     PROPERTIES ||--o{ REVIEWS : receives
     PROPERTIES ||--|| SEARCH_INDEX : indexed_by
 
     BOOKINGS ||--o{ REVIEWS : generates
-
-    REVIEWS ||--o{ REVIEW_PHOTOS : includes
+    BOOKINGS ||--|| PAYMENTS : has_one
 ```
 
 ## 6.1 Выбор СУБД
 
 | Таблица / Хранилище | СУБД / хранилище | Обоснование |
 | :--- | :--- | :--- |
-| `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos` | **PostgreSQL** | ACID-транзакции (бронирования, платежи), строгая консистентность, сложные JOIN-запросы |
+| `users`, `properties`, `bookings`, `payments`, `reviews` | **PostgreSQL** | ACID-транзакции (бронирования, платежи), строгая консистентность, сложные JOIN-запросы |
 | `search_index` | **Elasticsearch** | Полнотекстовый поиск, геопоиск, фильтрация по множеству полей, высокая производительность чтения |
 | `recommendations_cache` | **Redis** | Низкая задержка, частые чтения, TTL для кэша рекомендаций |
-| Фотографии (файлы) | **S3-совместимое хранилище** | Хранение больших бинарных данных, CDN-раздача, георепликация |
-
 **Итого:**
 
-- **PostgreSQL:** `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos`
+- **PostgreSQL:** `users`, `properties`, `bookings`, `payments`, `reviews`
 - **Elasticsearch:** `search_index`
 - **Redis:** `recommendations_cache`, кэш сессий, кэш популярных объявлений
-- **S3:** объекты по ключу из `photo_url`
 
 ## 6.2 Индексы
 
-| Таблица | Поле | Тип индекса | Обоснование |
-| :--- | :--- | :--- | :--- |
-| `users` | `id` | B-Tree | Поиск профиля по ID |
-| `users` | `email` | Hash | Поиск при авторизации |
-| `users` | `phone` | Hash | Поиск при авторизации |
-| `properties` | `id` | B-Tree | Доступ к карточке объявления |
-| `properties` | `host_id` | B-Tree | Поиск всех объявлений хоста |
-| `properties` | `(price_per_night, avg_rating)` | Composite B-Tree | Сортировка и фильтрация при поиске |
-| `properties` | `is_available` | B-Tree | Фильтрация только доступных объявлений |
-| `property_photos` | `(property_id, sort_order)` | Composite B-Tree | Получение всех фото объявления в правильном порядке |
-| `bookings` | `guest_id` | B-Tree | История бронирований пользователя |
-| `bookings` | `property_id` | B-Tree | Поиск броней для календаря доступности |
-| `bookings` | `(guest_id, status)` | Composite B-Tree | Фильтрация активных/завершённых броней |
-| `reviews` | `property_id` | B-Tree | Получение всех отзывов об объявлении |
-| `reviews` | `user_id` | B-Tree | Все отзывы, написанные пользователем |
-| `reviews` | `(property_id, rating)` | Composite B-Tree | Сортировка отзывов по рейтингу |
-| `search_index` | `search_vector` | GIN (PostgreSQL) / Inverted Index (Elasticsearch) | Полнотекстовый поиск по заголовку, описанию, адресу |
-| `search_index` | `(price_per_night, avg_rating, bedrooms)` | Composite B-Tree | Фильтрация и сортировка результатов поиска |
-| `recommendations_cache` | `user_id` | Redis Key | Быстрое получение персонализированных рекомендаций |
+Расчёт размера индексов по формуле: `(размер_ключа + 8 байт указатель) × количество_строк × 1.3`
+
+| Таблица | Поле | Тип индекса | Размер индекса | Обоснование |
+| :--- | :--- | :--- | :--- | :--- |
+| **`users`** | `id` (PK) | B-Tree | (8+8) × 80M × 1.3 ≈ 1,66 ГБ | Поиск профиля по ID |
+| **`users`** | `email` (UK) | B-Tree | (50+8) × 80M × 1.3 ≈ 6,03 ГБ | Поиск при авторизации |
+| **`users`** | `phone` (UK) | B-Tree | (15+8) × 80M × 1.3 ≈ 2,39 ГБ | Поиск при авторизации |
+| **`properties`** | `id` (PK) | B-Tree | (8+8) × 28M × 1.3 ≈ 0,58 ГБ | Доступ к карточке объявления |
+| **`properties`** | `host_id` | B-Tree | (8+8) × 28M × 1.3 ≈ 0,58 ГБ | Поиск всех объявлений хоста |
+| **`properties`** | `(price_per_night, avg_rating)` | Composite B-Tree | (4+4+8) × 28M × 1.3 ≈ 0,58 ГБ | Сортировка и фильтрация при поиске |
+| **`properties`** | `is_available` | B-Tree | (1+8) × 28M × 1.3 ≈ 0,33 ГБ | Фильтрация доступных объявлений |
+| **`bookings`** | `id` (PK) | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | Доступ к бронированию |
+| **`bookings`** | `guest_id` | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | История бронирований пользователя |
+| **`bookings`** | `property_id` | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | Поиск броней для календаря |
+| **`bookings`** | `(guest_id, status)` | Composite B-Tree | (8+20+8) × 1,16B × 1.3 ≈ 54,3 ГБ | Фильтрация активных броней |
+| **`payments`** | `id` (PK) | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | Доступ к платежу |
+| **`payments`** | `booking_id` | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | Связь платежа с бронированием |
+| **`payments`** | `user_id` | B-Tree | (8+8) × 1,16B × 1.3 ≈ 24,1 ГБ | История платежей пользователя |
+| **`payments`** | `status` | B-Tree | (20+8) × 1,16B × 1.3 ≈ 42,2 ГБ | Фильтрация по статусу платежа |
+| **`reviews`** | `id` (PK) | B-Tree | (8+8) × 300M × 1.3 ≈ 6,24 ГБ | Доступ к отзыву |
+| **`reviews`** | `property_id` | B-Tree | (8+8) × 300M × 1.3 ≈ 6,24 ГБ | Получение отзывов об объявлении |
+| **`reviews`** | `user_id` | B-Tree | (8+8) × 300M × 1.3 ≈ 6,24 ГБ | Отзывы пользователя |
+| **`reviews`** | `(property_id, rating)` | Composite B-Tree | (8+2+8) × 300M × 1.3 ≈ 7,02 ГБ | Сортировка отзывов по рейтингу |
+| **`search_queries`** | `id` (PK) | B-Tree | (16+8) × 34M/сут × 1.3 ≈ 1,06 ГБ/сут | Уникальный ID поиска |
+| **`search_queries`** | `user_id` | B-Tree | (8+8) × 34M/сут × 1.3 ≈ 0,71 ГБ/сут | История поиска пользователя |
+| **`recommendations`** | `id` (PK) | B-Tree | (8+8) × 1,6B/сут × 1.3 ≈ 33,3 ГБ/сут | Доступ к рекомендации |
+| **`recommendations`** | `user_id` | B-Tree | (8+8) × 1,6B/сут × 1.3 ≈ 33,3 ГБ/сут | Рекомендации пользователя |
+
 
 ## 6.3 Шардирование и резервирование СУБД
 
-**Шардирование**
+**Шардирование** (только для таблиц > 100 ГБ)
 
-| Таблица | СУБД | Ключ шардирования | Обоснование |
-| :--- | :--- | :--- | :--- |
-| `users` | PostgreSQL | `id` | Равномерное распределение нагрузки |
-| `properties` | PostgreSQL | `id` | Равномерное распределение объявлений |
-| `property_photos` | PostgreSQL | `property_id` | Все фото одного объявления на одном узле |
-| `bookings` | PostgreSQL | `guest_id` | Все бронирования одного гостя на одном узле |
-| `reviews` | PostgreSQL | `property_id` | Все отзывы об одном объекте на одном узле |
-| `review_photos` | PostgreSQL | `review_id` | Все фото одного отзыва на одном узле |
-| `search_index` | Elasticsearch | `property_id` (routing) | Документ одного объявления на одном шарде |
-| `recommendations_cache` | Redis | `user_id` | Кэш одного пользователя на одном узле кластера |
+| Таблица | СУБД | Ключ шардирования | Размер | Обоснование |
+| :--- | :--- | :--- | :--- | :--- |
+| `reviews` | PostgreSQL | `property_id` | 1,2 ТБ (>100 ГБ) | Все отзывы об одном объекте на одном узле |
+| `payments` | PostgreSQL | `user_id` | 105 ГБ (>100 ГБ) | Все платежи пользователя на одном узле |
+| `bookings` | PostgreSQL | `guest_id` | 83 ГБ (<100 ГБ) | Шардирование не требуется |
+| `properties` | PostgreSQL | — | 94 ГБ (<100 ГБ) | Шардирование не требуется |
+| `users` | PostgreSQL | — | 28 ГБ (<100 ГБ) | Шардирование не требуется |
 
 **Резервирование**
 
@@ -661,7 +661,7 @@ erDiagram
 | PostgreSQL | Master–Replica (1 мастер, 2 реплики). Запись на мастер, чтение с реплик. Автоматический failover через Patroni | Исключение единой точки отказа, распределение нагрузки чтения (1 814–1 968 RPS) |
 | Elasticsearch | Каждый шард имеет 1 реплику (Replication Factor = 2). Master-узел выбирается автоматически | Отказоустойчивость поиска, сохранение данных при падении узла |
 | Redis | Redis Cluster (мастер + реплика на каждый слот). Автоматический failover | Отказоустойчивость кэша рекомендаций |
-| S3 | Георепликация между регионами (EU, US, AP) | Защита от отказа целого дата-центра, быстрая CDN-раздача фото |
+
 
 ## 6.4 Клиентские библиотеки и интеграции
 
@@ -670,7 +670,6 @@ erDiagram
 | PostgreSQL | `pgx`, `jackc/pgx` | `psycopg2`, `asyncpg`, `SQLAlchemy` |
 | Elasticsearch | `elastic/go-elasticsearch` | `elasticsearch-py`, `elasticsearch-dsl` |
 | Redis | `go-redis/redis` | `redis-py`, `aredis` |
-| S3 | `minio-go`, `aws-sdk-go` | `boto3`, `minio-py` |
 
 ## 6.5 Балансировка запросов и мультиплексирование подключений
 
@@ -679,50 +678,44 @@ erDiagram
 | PostgreSQL | PgBouncer (пул соединений) | PgBouncer поддерживает пул постоянных соединений к PostgreSQL, объединяя множество коротких подключений в ограниченное число долгоживущих сессий. Это снижает накладные расходы на создание новых соединений (пик ~3 628 RPS) |
 | Elasticsearch | Встроенный HTTP-балансировщик + клиентское кеширование | Клиент получает список узлов и распределяет запросы round-robin. Запросы к поиску кешируются на уровне приложения |
 | Redis | Smart Client (go-redis) | Клиент сам вычисляет, какой узел кластера отвечает за ключ (CRC16 хэш слота), и обращается к нему напрямую |
-| S3 | CDN + GeoDNS | Медиафайлы раздаются через CDN (CloudFront) — edge-серверы ближе к пользователю. При отказе региона GeoDNS перенаправляет на работающий S3-бакет |
 
 ## 6.6 Схема резервного копирования
 
 | Хранилище | Что бэкапим | Как бэкапим | Зачем |
 | :--- | :--- | :--- | :--- |
-| PostgreSQL | `users`, `properties`, `property_photos`, `bookings`, `reviews`, `review_photos` | Ежедневный полный бэкап + непрерывная архивация WAL (pg_basebackup + WAL-G) | Можно восстановить на любой момент времени (до секунды). Критично для бронирований и платежей |
+| PostgreSQL | `users`, `properties`, `bookings`, `payments`, `reviews` | Ежедневный полный бэкап + непрерывная архивация WAL (pg_basebackup + WAL-G) | Можно восстановить на любой момент времени (до секунды). Критично для бронирований и платежей |
 | Elasticsearch | `search_index` | Ежедневные снапшоты (Elasticsearch Snapshot API) + инкрементальные бэкапы изменений | Восстановление поискового индекса при коррупции данных |
 | Redis | `recommendations_cache`, сессии | AOF (каждую секунду) + RDB (раз в час) | Минимум потерь (до 1 секунды), легкое восстановление кэша |
-| S3 | Фото объявлений, фото отзывов, аватары | Георепликация между регионами (EU → US → AP) | Сами файлы не бэкапятся отдельно — устойчивость за счёт копирования в другие регионы. При падении региона — автоматическое переключение |
 
 ## 6.7 Сводная таблица требований к БД
 
 | Хранилище | Таблицы / данные | RPS чтения (пик) | RPS записи (пик) | Объём данных | Ключевое требование |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | PostgreSQL | `users` | 1 814 | 61 | ~28 ГБ | Strong Consistency |
-| PostgreSQL | `properties` | 1 968 | 20 | ~38 ГБ | Strong Consistency |
-| PostgreSQL | `property_photos` | 1 968 | 20 | ~63 ГБ | Strong Consistency |
+| PostgreSQL | `properties` | 1 968 | 20 | ~94 ГБ | Strong Consistency |
 | PostgreSQL | `bookings` | 78 | 39 | ~83 ГБ | Strong Consistency (ACID) |
-| PostgreSQL | `reviews` | 630 | 1 | ~615 ГБ | Strong Consistency |
-| PostgreSQL | `review_photos` | 630 | 1 | ~36 ГБ | Strong Consistency |
+| PostgreSQL | `payments` | 78 | 39 | ~105 ГБ | Strong Consistency (ACID) |
+| PostgreSQL | `reviews` | 630 | 1 | ~1,2 ТБ | Eventual Consistency |
 | Elasticsearch | `search_index` | 788 | 788 | ~21 ГБ/сут | Eventual Consistency |
 | Redis | `recommendations_cache` | 1 814 | 1 814 | ~58 ГБ/сут | Eventual Consistency |
-| S3 | Фото (все) | ~90 Гбит/с (исходящий трафик) | ~6 Гбит/с (входящий) | ~147 ТБ (всего) | Eventual Consistency |
 
 ## 11. Список ресурсов <a name="11"></a>
 
-[^1]: [Официальный отчет Booking Holdings](https://electroiq.com/stats/booking-com-statistics/)
+[^1]: [Booking.com Statistics And Facts (2025)](https://electroiq.com/stats/booking-com-statistics/)
 [^2]: [Статистика трафика SimilarWeb](https://hypestat.com/info/booking.com) [2]
-[^3]: [Бизнес-аналитика BusinessOfApps](https://www.similarweb.com/ru/website/booking.com/#traffic) [3]
+[^3]: [booking.com Анализ сайта для февраль 2026](https://www.similarweb.com/ru/website/booking.com/#traffic) [3]
 [^4]: [Количество отзывов на booking](https://www.booking.com) [4]
-[^5]: [Количество зарегистрированных пользователей на TripAdvisor](https://ru.wikipedia.org/wiki/Tripadvisor) [5]
-[^6]: [Количество фото на отзывах](https://review42.com/resources/tripadvisor-statistics/) [6]
-[^7]: [Статистика отзывов по TripAdvisor](https://passport-photo.online/blog/tripadvisor-statistics/)) [7]
-[^8]: [Количество объявлений](https://www.dreambigtravelfarblog.com/blog/booking-com-statistics) [8]
-[^9]: [Количество броней за 2023 год](https://topic.ru/statistics/travel/key-data/kolichestvo-bronirovaniy-cherez-booking-com-po-segmentam/) [9]
-[^10]: [Распределение населения по миру](https://luminocity3d.org/WorldPopDen/#7/42.981/11.964)) [10]
-[^11]: [Распределение Ixps](https://www.datacentermap.com/ixp/) [11]
-[^12]: [Кабельное](https://www.submarinecablemap.com/) [12]
-[^13]: [Количество бронирований за год](https://topic.ru/statistics/travel/key-data/kolichestvo-bronirovaniy-cherez-booking-com-po-segmentam/) [13]
-[^14]: [Статистика просмотра отзывов](https://inclient.ru/stats-reviews/)
-[^15]:[](https://www.netify.ai/resources/hostnames/distribution-xml.booking.com)
-[^16]: [](https://dlthub.com/context/source/booking-com)
-[^17]: [](https://www.haproxy.com/user-spotlight-series/scaling-the-edge-how-booking-com-powers-a-global-application-delivery-network-with-haproxy)
-[^18]: [](https://www.netify.ai/resources/hostnames/distribution-xml.booking.com)
-[^19]: [](https://www.statscrop.com/www/booking.com)
-[^20]: [](https://cdn.haproxy.com/success-stories/upgrading-to-haproxy-in-a-load-balancer-as-a-service-platform-with-booking-com)
+[^5]: [TripAdvisor (wikipedia)](https://ru.wikipedia.org/wiki/Tripadvisor) [5]
+[^6]: [Where is TripAdvisor Going? 39+ Signpost Statistics](https://review42.com/resources/tripadvisor-statistics/) [6]
+[^7]: [30+ Tripadvisor Statistics, Facts, and Trends [2026]](https://passport-photo.online/blog/tripadvisor-statistics/) [7]
+[^8]: [40+ Booking.com Statistics [Latest Figures!]](https://www.dreambigtravelfarblog.com/blog/booking-com-statistics) [8]
+[^9]: [Количество бронирований через Booking.com, по сегментам](https://topic.ru/statistics/travel/key-data/kolichestvo-bronirovaniy-cherez-booking-com-po-segmentam/) [9]
+[^10]: [World Population Density](https://luminocity3d.org/WorldPopDen/#7/42.981/11.964) [10]
+[^11]: [Internet Exchange Points](https://www.datacentermap.com/ixp/) [11]
+[^12]: [Submarine Cable Map](https://www.submarinecablemap.com/) [12]
+[^14]: [Статистика просмотра отзывов](https://inclient.ru/stats-reviews/) [14]
+[^15]: [Hostname Info](https://www.netify.ai/resources/hostnames/distribution-xml.booking.com) [15]
+[^16]: [Booking.com Python API Docs | dltHub](https://dlthub.com/context/source/booking-com) [16]
+[^17]: [Scaling the Edge: How Booking.com Powers a Global Application Delivery Network with HAProxy](https://www.haproxy.com/user-spotlight-series/scaling-the-edge-how-booking-com-powers-a-global-application-delivery-network-with-haproxy) [17]
+[^19]: [StatsCrop statistics](https://www.statscrop.com/www/booking.com) [19]
+[^20]: [Upgrading to HAProxy in a Load-Balancer-as-a-Service Platform with Booking.com](https://cdn.haproxy.com/success-stories/upgrading-to-haproxy-in-a-load-balancer-as-a-service-platform-with-booking-com) [20]
