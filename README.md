@@ -701,7 +701,7 @@ erDiagram
 
 ## 11. Список ресурсов <a name="11"></a>
 
-[^1]: [Booking.com Statistics And Facts (2025)](https://electroiq.com/stats/booking-com-statistics/)
+[^1]: [Booking.com Statistics And Facts (2025)](https://electroiq.com/stats/booking-com-statistics/) [1]
 [^2]: [Статистика трафика SimilarWeb](https://hypestat.com/info/booking.com) [2]
 [^3]: [booking.com Анализ сайта для февраль 2026](https://www.similarweb.com/ru/website/booking.com/#traffic) [3]
 [^4]: [Количество отзывов на booking](https://www.booking.com) [4]
