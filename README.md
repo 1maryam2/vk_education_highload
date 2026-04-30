@@ -523,7 +523,8 @@ erDiagram
         int bathrooms
         json amenities
         boolean is_available
-        text[] photo_urls
+        main_photo_url text,         
+        photo_urls text[], 
         timestamptz created_at
         timestamptz updated_at
     }
