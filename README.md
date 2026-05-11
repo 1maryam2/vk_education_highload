@@ -727,64 +727,106 @@ erDiagram
 ```mermaid
 graph TD
     User[("Пользователь")]
-    GeoDNS["GeoDNS/Anycast<br>направляет в ближ. ДЦ"]
-    L4Balancer["L4 Балансировщик<br>LVS + ECMP на коммутаторах<br>(Keepalived для VIP)"]
-    L7Gateway["L7 API Gateway<br>HAProxy<br>SSL termination,<br> маршрутизация по URL,<br> проверка сессии"]
-    
-    subgraph "Микросервисы (Golang)"
-        SearchSvc[Поиск]
-        BookingSvc[Бронирования]
-        PaymentSvc[Платежи]
-        ProfileSvc[Профили]
-        ReviewSvc[Отзывы]
-        RecSvc[Рекомендации]
+    GeoDNS["GeoDNS/Anycast"]
+    L4Balancer["L4 Балансировщик LVS/ECMP"]
+    HAProxy["L7 API Gateway HAProxy<br>(SSL termination, проверка сессии)"]
+    ApiGateway["API Gateway<br>(маршрутизация по URL)"]
+
+    subgraph Microservices[Микросервисы]
+        SearchSvc["Поиск"]
+        BookingSvc["Бронирования"]
+        PaymentSvc["Платежи"]
+        ProfileSvc["Профили"]
+        ReviewSvc["Отзывы"]
+        RecSvc["Рекомендации"]
     end
 
-    subgraph "Хранилища данных"
-        Pg[(PostgreSQL<br>users, properties, bookings,<br>payments, reviews)]
-        Es[(Elasticsearch<br>search_index)]
-        Redis[(Redis<br>сессии, рекомендации,<br> кэш)]
-        S3[(S3 + CDN<br>фото объявлений/отзывов)]
+    subgraph Workers[Асинхронные воркеры]
+        RatingWorker["Rating Update Worker"]
+        PaymentWorker["Payment Worker"]
+        CacheWorker["Cache Update Worker"]
+        NotificationWorker["Notification Worker"]
     end
 
-    Kafka[Apache Kafka<br>асинхронные события]
+    subgraph KafkaTopics[Топики Kafka]
+        TopicReviews["reviews.events"]
+        TopicBookings["bookings.events"]
+    end
 
-    User --> GeoDNS
-    GeoDNS --> L4Balancer
-    L4Balancer --> L7Gateway
-    L7Gateway --> SearchSvc
-    L7Gateway --> BookingSvc
-    L7Gateway --> PaymentSvc
-    L7Gateway --> ProfileSvc
-    L7Gateway --> ReviewSvc
-    L7Gateway --> RecSvc
+    subgraph External[Внешние сервисы]
+        Stripe["Stripe API"]
+    end
 
-    SearchSvc -- r --> Es
-    BookingSvc -- r/w --> Pg
-    PaymentSvc -- r/w --> Pg
-    ProfileSvc -- r/w --> Pg
-    ReviewSvc -- r/w --> Pg
-    RecSvc -- r --> Redis
+    subgraph Observability[Мониторинг и логи]
+        Prometheus["Prometheus + Grafana"]
+        ELK["ELK Stack"]
+    end
 
-    ReviewSvc -- событие --> Kafka
-    BookingSvc -- событие --> Kafka
-    Kafka -- обновление рейтинга --> Pg
-    Kafka -- обновление кэша --> Redis
+    subgraph Storage[Хранилища данных - свои у каждого сервиса]
+        DB_Booking[("Booking DB (PostgreSQL)")]
+        DB_Payment[("Payment DB (PostgreSQL)")]
+        DB_Profile[("Profile DB (PostgreSQL)")]
+        DB_Reviews[("Reviews DB (Cassandra)")]
+        DB_Search[("Search Index (Elasticsearch)")]
+        DB_Rec[("Recommendations Cache (Redis)")]
+        S3[("Фото (S3 + CDN)")]
+    end
 
-    SearchSvc -- фильтрация/геопоиск --> Es
-    L7Gateway -- проверка сессии --> Redis
-    L7Gateway -- раздача статики --> S3
-    S3 -- CDN кэширование --> CDN[CDN bstatic.com]
+    CDN[CDN bstatic.com]
+
+    User --> GeoDNS --> L4Balancer --> HAProxy --> ApiGateway
+
+    ApiGateway --> SearchSvc
+    ApiGateway --> BookingSvc
+    ApiGateway --> PaymentSvc
+    ApiGateway --> ProfileSvc
+    ApiGateway --> ReviewSvc
+    ApiGateway --> RecSvc
+
+    SearchSvc -- "r (синхр)" --> DB_Search
+    BookingSvc -- "r/w (синхр)" --> DB_Booking
+    PaymentSvc -- "r/w (синхр)" --> DB_Payment
+    ProfileSvc -- "r/w (синхр)" --> DB_Profile
+    ReviewSvc -- "r (синхр)" --> DB_Reviews
+    RecSvc -- "r (синхр)" --> DB_Rec
+
+    ReviewSvc -- "событие (асинхр)" --> TopicReviews
+    BookingSvc -- "событие (асинхр)" --> TopicBookings
+
+    TopicReviews --> RatingWorker
+    TopicReviews --> CacheWorker
+    TopicBookings --> PaymentWorker
+    TopicBookings --> CacheWorker
+    TopicBookings --> NotificationWorker
+
+    RatingWorker -- "обновление рейтинга" --> DB_Booking
+    PaymentWorker -- "вызов Stripe" --> Stripe
+    PaymentWorker -- "запись статуса" --> DB_Payment
+    CacheWorker -- "обновление кэша" --> DB_Rec
+    NotificationWorker --> ExternalPush[Push/email]
+
+    HAProxy -- "раздача статики" --> S3
+    S3 --> CDN
     CDN --> User
 
-    style User fill:#f9f,stroke:#333,stroke-width:2px
-    style L4Balancer fill:#bbf,stroke:#333
-    style L7Gateway fill:#bbf,stroke:#333
-    style Pg fill:#dfd,stroke:#333
-    style Es fill:#dfd,stroke:#333
-    style Redis fill:#dfd,stroke:#333
-    style S3 fill:#dfd,stroke:#333
-    style Kafka fill:#fdd,stroke:#333
+    SearchSvc -.-> Prometheus
+    BookingSvc -.-> Prometheus
+    Prometheus -.-> Grafana
+    SearchSvc -.-> ELK
+    BookingSvc -.-> ELK
+
+    classDef routing fill:#ccf,stroke:#333
+    class ApiGateway,HAProxy,L4Balancer,GeoDNS routing
+    classDef ms fill:#cfc,stroke:#333
+    class SearchSvc,BookingSvc,PaymentSvc,ProfileSvc,ReviewSvc,RecSvc ms
+    classDef store fill:#dfd,stroke:#333
+    class DB_Booking,DB_Payment,DB_Profile,DB_Reviews,DB_Search,DB_Rec,S3 store
+    classDef async fill:#fdd,stroke:#333
+    class TopicReviews,TopicBookings async
+    classDef worker fill:#ffc,stroke:#333
+    class RatingWorker,PaymentWorker,CacheWorker,NotificationWorker worker
+    classDef external fill:#eef,stroke:#333
+    class Stripe,Prometheus,ELK,CDN external
 ```
 
 **Пояснения к схеме**:
